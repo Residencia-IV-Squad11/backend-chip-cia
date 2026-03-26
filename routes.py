@@ -91,30 +91,55 @@ def detalhe_atendimento(atendimento_id: int):
     return jsonify({"sucesso": True, "dados": atendimento.to_dict()}), 200
 
 
+
 # ──────────────────────────────────────────────────────────────
 # GET /api/atendimento/listar
 # ──────────────────────────────────────────────────────────────
 @atendimento_bp.route("/listar", methods=["GET"])
 def listar_atendimentos():
     """
-    Lista atendimentos com paginação.
-    Query params: page (default 1), per_page (default 20, max 100)
+    Lista atendimentos com paginação, trazendo os dados de 
+    classificação e qualidade através de JOINs.
     """
     page     = request.args.get("page",     1,  type=int)
     per_page = min(request.args.get("per_page", 20, type=int), 100)
 
+    # Fazemos um JOIN explícito para garantir que todas as métricas vão para o frontend
     paginado = (
-        Atendimento.query
+        db.session.query(Atendimento, Qualidade, Classificacao, Categoria, Sentimento)
+        .outerjoin(Qualidade, Qualidade.atendimento_id == Atendimento.idatendimento)
+        .outerjoin(Classificacao, Classificacao.atendimento_id == Atendimento.idatendimento)
+        .outerjoin(Categoria, Classificacao.categoria_id == Categoria.idcategoria)
+        .outerjoin(Sentimento, Classificacao.sentimento_id == Sentimento.idsentimento)
         .order_by(Atendimento.data_criacao.desc())
         .paginate(page=page, per_page=per_page, error_out=False)
     )
+
+    atendimentos_completos = []
+    
+    # Extraímos os dados das múltiplas tabelas para um único dicionário plano
+    for atd, qual, clas, cat, sent in paginado.items:
+        atendimentos_completos.append({
+            "idatendimento": atd.idatendimento,
+            "resumo": atd.resumo,
+            "data_criacao": atd.data_criacao.isoformat() if atd.data_criacao else None,
+            # Se houver qualidade, enviamos os scores, senão enviamos 0
+            "score_final": float(qual.score_final) if qual and qual.score_final else 0,
+            "empatia": int(qual.empatia) if qual and qual.empatia else 0,
+            "clareza": int(qual.clareza) if qual and qual.clareza else 0,
+            "objetividade": int(qual.objetividade) if qual and qual.objetividade else 0,
+            "resolutividade": int(qual.resolutividade) if qual and qual.resolutividade else 0,
+            # Se houver classificação, enviamos os nomes, senão enviamos um valor padrão
+            "categoria": cat.nome if cat else "Sem Categoria",
+            "sentimento": sent.nome if sent else "Neutro"
+        })
 
     return jsonify({
         "sucesso":    True,
         "total":      paginado.total,
         "pagina":     paginado.page,
         "paginas":    paginado.pages,
-        "atendimentos": [a.to_dict() for a in paginado.items],
+        "atendimentos": atendimentos_completos,
     }), 200
 
 

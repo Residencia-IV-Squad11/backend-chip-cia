@@ -98,7 +98,7 @@ def analisar_atendimento(texto_conversa: str) -> dict:
         logger.info("Enviando atendimento para análise no Groq...")
 
         chat_completion = client.chat.completions.create(
-            model="llama3-70b-8192",
+            model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {
