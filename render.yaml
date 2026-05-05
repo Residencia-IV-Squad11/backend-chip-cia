@@ -1,0 +1,23 @@
+services:
+  # O Servidor Web da sua aplicação Flask
+  - type: web
+    name: backend-chip-cia
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.0
+      # Você pode definir as outras variáveis de ambiente no painel do Render
+      # ou usar um grupo de variáveis compartilhadas.
+
+  # O Cron Job que vai rodar periodicamente
+  - type: cron
+    name: cron-alimenta-conversas
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python cron_feed_conversations.py
+    schedule: "0 0 * * *" # Roda todo dia à meia noite. Ajuste se necessário.
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.0

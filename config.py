@@ -26,8 +26,9 @@ def create_app() -> Flask:
     DB_PORT = os.getenv("DB_PORT", "3306")
     DB_NAME = os.getenv("DB_NAME", "chip_e_cia")
 
-    app.config["SQLALCHEMY_DATABASE_URI"] = (
-        f"postgresql://root:zbzH8DUmrf32UyBoF3QPIZmocKjhrozX@dpg-d726ocea2pns739kmt9g-a.oregon-postgres.render.com/chip_e_cia"
+    app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
+        "DATABASE_URL",
+        "postgresql://root:zbzH8DUmrf32UyBoF3QPIZmocKjhrozX@dpg-d726ocea2pns739kmt9g-a.oregon-postgres.render.com/chip_e_cia"
     )
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.config["SQLALCHEMY_ECHO"] = os.getenv("FLASK_DEBUG", "False") == "True"
