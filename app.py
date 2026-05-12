@@ -9,6 +9,7 @@ Uso:
 
 import logging
 import os
+from flask import send_from_directory
 from config import create_app, db
 
 # ── Configuração de logging ────────────────────────────────────
@@ -33,6 +34,23 @@ with app.app_context():
 @app.route("/health", methods=["GET"])
 def health():
     return {"status": "ok", "service": "chip_e_cia API"}, 200
+
+
+# ── Rotas para servir Frontend React ────────────────────────────
+@app.route("/", methods=["GET"])
+def serve_frontend():
+    """Serve o index.html do React"""
+    return send_from_directory(app.static_folder, "index.html")
+
+
+@app.route("/<path:filename>", methods=["GET"])
+def serve_static(filename):
+    """Serve arquivos estáticos (CSS, JS, imagens)"""
+    try:
+        return send_from_directory(app.static_folder, filename)
+    except Exception as e:
+        # Se arquivo não existe, retorna o index.html (para SPA routing)
+        return send_from_directory(app.static_folder, "index.html")
 
 
 # ── Tratamento global de erros ─────────────────────────────────

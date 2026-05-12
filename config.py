@@ -20,16 +20,36 @@ def create_app() -> Flask:
     app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev-secret-change-me")
 
     # ── Banco de Dados ─────────────────────────────────────────
-    DB_USER = os.getenv("DB_USER", "root")
-    DB_PASS = os.getenv("DB_PASSWORD", "")
-    DB_HOST = os.getenv("DB_HOST", "localhost")
-    DB_PORT = os.getenv("DB_PORT", "3306")
-    DB_NAME = os.getenv("DB_NAME", "chip_e_cia")
+    # Tenta variável de ambiente DATABASE_URL primeiro (para hospedagem)
+    # Caso contrário, usa variáveis de banco relacionais ou SQLite local.
+    DATABASE_URL = os.getenv("DATABASE_URL")
 
-    app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
-        "DATABASE_URL",
-        "postgresql://root:zbzH8DUmrf32UyBoF3QPIZmocKjhrozX@dpg-d726ocea2pns739kmt9g-a.oregon-postgres.render.com/chip_e_cia"
-    )
+    if DATABASE_URL:
+        app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URL
+    else:
+        DB_TYPE = os.getenv("DB_TYPE")
+        DB_USER = os.getenv("DB_USER")
+        DB_PASS = os.getenv("DB_PASSWORD")
+        DB_HOST = os.getenv("DB_HOST")
+        DB_PORT = os.getenv("DB_PORT")
+        DB_NAME = os.getenv("DB_NAME")
+
+        if DB_TYPE and DB_USER and DB_PASS and DB_HOST and DB_PORT and DB_NAME:
+            if DB_TYPE == "mysql+pymysql":
+                app.config["SQLALCHEMY_DATABASE_URI"] = (
+                    f"mysql+pymysql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+                )
+            else:
+                app.config["SQLALCHEMY_DATABASE_URI"] = (
+                    f"postgresql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+                )
+        else:
+            # Fallback para SQLite local se nenhuma configuração for fornecida
+            app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///chip_e_cia.db"
+        else:
+            sqlite_path = os.path.join(os.path.dirname(__file__), "chip_e_cia.db")
+            app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{sqlite_path}"
+>>>>>>> Stashed changes
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.config["SQLALCHEMY_ECHO"] = os.getenv("FLASK_DEBUG", "False") == "True"
 

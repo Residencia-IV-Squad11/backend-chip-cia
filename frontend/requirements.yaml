@@ -1,0 +1,15 @@
+packages:
+  "framer-motion": "For fluid page transitions, expanding rows, and polished loading states"
+  "recharts": "For the dashboard data visualization (donut and line charts)"
+  "clsx": "Utility for conditionally joining classNames"
+  "tailwind-merge": "Utility for merging tailwind classes without style conflicts"
+  "date-fns": "For formatting dates in the history table and charts"
+
+images:
+  - path: "artifacts/chip-cia-dashboard/public/images/auth-bg.png"
+    description: "Dark futuristic minimal abstract background with subtle deep red neon accents, volumetric lighting, glassmorphism elements, 8k resolution, highly detailed"
+    aspect_ratio: "16:9"
+
+notes:
+  - "Importing API hooks directly from @workspace/api-client-react as per implementation notes"
+  - "Theme is forced to dark mode with a cohesive black and red palette"
