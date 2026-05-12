@@ -72,6 +72,8 @@ DB_NAME=chip_e_cia
 GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxxxxxx
 ```
 
+> Atenção: não deixe `GROQ_API_KEY` com o valor de placeholder. Substitua por sua chave real do Groq, caso contrário a análise retornará erro de configuração.
+
 ### 5. Crie o banco de dados MySQL
 ```sql
 CREATE DATABASE IF NOT EXISTS chip_e_cia;

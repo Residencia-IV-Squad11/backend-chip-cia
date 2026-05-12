@@ -70,6 +70,10 @@ def avaliar_atendimento():
         logger.warning("Dados inválidos do LLM: %s", exc)
         return jsonify({"sucesso": False, "erro": str(exc)}), 422
 
+    except EnvironmentError as exc:
+        logger.error("Erro de configuração do Groq: %s", exc)
+        return jsonify({"sucesso": False, "erro": str(exc)}), 500
+
     except RuntimeError as exc:
         logger.error("Erro na API do Groq: %s", exc)
         return jsonify({"sucesso": False, "erro": str(exc)}), 502
