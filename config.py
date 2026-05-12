@@ -46,10 +46,6 @@ def create_app() -> Flask:
         else:
             # Fallback para SQLite local se nenhuma configuração for fornecida
             app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///chip_e_cia.db"
-        else:
-            sqlite_path = os.path.join(os.path.dirname(__file__), "chip_e_cia.db")
-            app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{sqlite_path}"
->>>>>>> Stashed changes
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.config["SQLALCHEMY_ECHO"] = os.getenv("FLASK_DEBUG", "False") == "True"
 
