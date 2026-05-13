@@ -28,7 +28,7 @@ def create_app() -> Flask:
 
     db_url = os.getenv(
         "DATABASE_URL",
-        "postgresql://root:zbzH8DUmrf32UyBoF3QPIZmocKjhrozX@dpg-d726ocea2pns739kmt9g-a.oregon-postgres.render.com/chip_e_cia"
+        "postgresql://root:VKJOMuFKTTNcsfQd2RdkpnnloNsZtjcK@dpg-d82g384vikkc73a9757g-a/chipecia"
     )
     if db_url.startswith("postgres://"):
         db_url = db_url.replace("postgres://", "postgresql://", 1)
