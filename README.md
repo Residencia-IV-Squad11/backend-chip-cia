@@ -3,6 +3,8 @@
 API REST em Flask que analisa transcrições de atendimento ao cliente
 usando IA (Groq / Llama 3) e persiste métricas em MySQL.
 
+**🆕 Com Frontend React integrado!**
+
 ---
 
 ## 📁 Estrutura do Projeto
@@ -70,6 +72,8 @@ DB_NAME=chip_e_cia
 GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxxxxxx
 ```
 
+> Atenção: não deixe `GROQ_API_KEY` com o valor de placeholder. Substitua por sua chave real do Groq, caso contrário a análise retornará erro de configuração.
+
 ### 5. Crie o banco de dados MySQL
 ```sql
 CREATE DATABASE IF NOT EXISTS chip_e_cia;
@@ -85,6 +89,27 @@ Saída esperada:
 2024-XX-XX XX:XX:XX  INFO     __main__ — Tabelas verificadas/criadas com sucesso.
  * Running on http://0.0.0.0:5000
 ```
+
+### 7. (Opcional) Inicie o Frontend
+
+O frontend React está integrado na pasta `frontend/`. Para desenvolvimento:
+
+```bash
+cd frontend
+npm install              # ou: pnpm install
+npm run dev             # Roda em http://localhost:5173
+```
+
+O backend já está configurado com CORS para aceitar requisições do frontend.
+
+Para produção, compile o frontend e copie para a pasta `static/`:
+```bash
+npm run build
+xcopy dist\* ..\static\ /E /I /Y   # Windows
+# ou: cp -r dist/* ../static/      # Linux/Mac
+```
+
+Veja [INTEGRATION_GUIDE.md](INTEGRATION_GUIDE.md) para instruções completas.
 
 ---
 

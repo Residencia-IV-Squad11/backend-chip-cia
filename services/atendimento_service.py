@@ -6,6 +6,7 @@ services/atendimento_service.py — Orquestra o fluxo completo:
 """
 
 import logging
+import uuid
 from decimal import Decimal
 
 from config import db
@@ -103,6 +104,7 @@ def processar_atendimento(texto_conversa: str) -> dict:
 
         # 3c. Atendimento principal
         atendimento = Atendimento(
+            protocolo=str(uuid.uuid4()),
             texto=texto_conversa,
             resumo=resumo,
         )
