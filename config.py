@@ -26,10 +26,14 @@ def create_app() -> Flask:
     DB_PORT = os.getenv("DB_PORT", "3306")
     DB_NAME = os.getenv("DB_NAME", "chip_e_cia")
 
-    app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
+    db_url = os.getenv(
         "DATABASE_URL",
         "postgresql://root:zbzH8DUmrf32UyBoF3QPIZmocKjhrozX@dpg-d726ocea2pns739kmt9g-a.oregon-postgres.render.com/chip_e_cia"
     )
+    if db_url.startswith("postgres://"):
+        db_url = db_url.replace("postgres://", "postgresql://", 1)
+        
+    app.config["SQLALCHEMY_DATABASE_URI"] = db_url
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.config["SQLALCHEMY_ECHO"] = os.getenv("FLASK_DEBUG", "False") == "True"
 
