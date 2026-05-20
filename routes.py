@@ -6,6 +6,7 @@ routes.py — Blueprints e endpoints da API REST.
 """
 
 import logging
+import httpx
 from flask import Blueprint, jsonify, request
 from sqlalchemy import func
 
@@ -51,23 +52,36 @@ def avaliar_atendimento():
             400,
         )
 
+    external_id = body.get("external_id")
+
     try:
-        resultado = processar_atendimento(texto)
+        resultado = processar_atendimento(texto, external_id=external_id)
+        status_code = 201 if resultado.get("created", True) else 200
+        mensagem = (
+            "Atendimento analisado e salvo com sucesso."
+            if resultado.get("created", True)
+            else "Atendimento externo já processado anteriormente."
+        )
+
         return (
             jsonify(
                 {
                     "sucesso": True,
                     "atendimento_id": resultado["atendimento_id"],
                     "score_final": resultado["score_final"],
-                    "mensagem": "Atendimento analisado e salvo com sucesso.",
+                    "mensagem": mensagem,
                 }
             ),
-            201,
+            status_code,
         )
 
     except ValueError as exc:
         logger.warning("Dados inválidos do LLM: %s", exc)
         return jsonify({"sucesso": False, "erro": str(exc)}), 422
+
+    except EnvironmentError as exc:
+        logger.error("Erro de configuração do Groq: %s", exc)
+        return jsonify({"sucesso": False, "erro": str(exc)}), 500
 
     except RuntimeError as exc:
         logger.error("Erro na API do Groq: %s", exc)
@@ -90,6 +104,65 @@ def detalhe_atendimento(atendimento_id: int):
 
     return jsonify({"sucesso": True, "dados": atendimento.to_dict()}), 200
 
+
+def _criar_atendimento_a_partir_da_api_externa(protocolo: str, dados: dict) -> Atendimento:
+    texto = dados.get("texto") or dados.get("descricao") or dados.get("mensagem") or ""
+    resumo = dados.get("resumo") or (texto[:200] if texto else None)
+
+    return Atendimento(
+        protocolo=protocolo,
+        texto=texto,
+        resumo=resumo,
+    )
+
+
+# ──────────────────────────────────────────────────────────────
+# GET /api/atendimento/importar/<protocolo>
+# ──────────────────────────────────────────────────────────────
+@atendimento_bp.route("/importar/<string:protocolo>", methods=["GET"])
+def importar_atendimento(protocolo: str):
+    """Importa um atendimento de uma API externa pelo protocolo e salva no banco."""
+    external_url = f"https://api.externa.com/atendimento/{protocolo}"
+
+    try:
+        response = httpx.get(external_url, timeout=10)
+    except httpx.RequestError as exc:
+        logger.error("Falha ao conectar na API externa: %s", exc)
+        return jsonify({"sucesso": False, "erro": "Não foi possível consultar a API externa."}), 400
+
+    if response.status_code != 200:
+        return jsonify({"sucesso": False, "erro": "API externa retornou status inválido."}), 400
+
+    try:
+        dados_externos = response.json()
+    except ValueError:
+        return jsonify({"sucesso": False, "erro": "Resposta da API externa não é JSON válido."}), 400
+
+    if not isinstance(dados_externos, dict):
+        return jsonify({"sucesso": False, "erro": "Resposta da API externa não contém um objeto JSON."}), 400
+
+    try:
+        atendimento = _criar_atendimento_a_partir_da_api_externa(protocolo, dados_externos)
+        db.session.add(atendimento)
+        db.session.commit()
+
+        return jsonify({"sucesso": True, "dados": atendimento.to_dict()}), 201
+    except Exception as exc:
+        logger.exception("Erro ao salvar atendimento importado.")
+        db.session.rollback()
+        return jsonify({"sucesso": False, "erro": "Erro interno ao salvar atendimento."}), 500
+
+
+# ──────────────────────────────────────────────────────────────
+# GET /api/atendimento/protocolo/<protocolo>
+# ──────────────────────────────────────────────────────────────
+@atendimento_bp.route("/protocolo/<string:protocolo>", methods=["GET"])
+def consultar_atendimento_por_protocolo(protocolo: str):
+    atendimento = Atendimento.query.filter_by(protocolo=protocolo).first()
+    if not atendimento:
+        return jsonify({"sucesso": False, "erro": "Atendimento não encontrado."}), 404
+
+    return jsonify({"sucesso": True, "dados": atendimento.to_dict()}), 200
 
 
 # ──────────────────────────────────────────────────────────────
@@ -140,6 +213,26 @@ def listar_atendimentos():
         "pagina":     paginado.page,
         "paginas":    paginado.pages,
         "atendimentos": atendimentos_completos,
+    }), 200
+
+
+# ──────────────────────────────────────────────────────────────
+# POST /api/atendimento/validar
+# ──────────────────────────────────────────────────────────────
+@atendimento_bp.route("/validar", methods=["POST"])
+def validar_atendimento():
+    """Valida um texto de atendimento e retorna informações básicas."""
+    body = request.get_json(silent=True)
+
+    if not body or not body.get("texto"):
+        return jsonify({"sucesso": False, "erro": "O campo 'texto' é obrigatório."}), 400
+
+    texto = str(body["texto"]).strip()
+    return jsonify({
+        "sucesso": True,
+        "texto_original": texto,
+        "tamanho": len(texto),
+        "mensagem": "Texto recebido com sucesso.",
     }), 200
 
 

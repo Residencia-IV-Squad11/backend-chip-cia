@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Chip & Cia - Dashboard de Atendimento"
+version = "1.0.0"
+id = "artifacts/chip-cia-dashboard"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22286
+
+[services.development]
+run = "pnpm --filter @workspace/chip-cia-dashboard run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/chip-cia-dashboard", "run", "build" ]
+publicDir = "artifacts/chip-cia-dashboard/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22286"
+BASE_PATH = "/"

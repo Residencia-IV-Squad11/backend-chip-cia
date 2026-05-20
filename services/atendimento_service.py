@@ -6,6 +6,7 @@ services/atendimento_service.py — Orquestra o fluxo completo:
 """
 
 import logging
+import uuid
 from decimal import Decimal
 
 from config import db
@@ -46,21 +47,39 @@ def _get_or_create(model, filter_kwargs: dict, extra_kwargs: dict | None = None)
 # ──────────────────────────────────────────────────────────────
 # Função principal
 # ──────────────────────────────────────────────────────────────
-def processar_atendimento(texto_conversa: str) -> dict:
+def processar_atendimento(texto_conversa: str, external_id: str | None = None) -> dict:
     """
     Processa um atendimento de ponta a ponta.
 
     Args:
         texto_conversa: Texto bruto da conversa do cliente.
+        external_id: Identificador externo opcional para evitar duplicidades.
 
     Returns:
-        dict com "atendimento_id" e "score_final".
+        dict com "atendimento_id", "score_final" e "created".
 
     Raises:
         ValueError: Dados inválidos retornados pelo LLM.
         RuntimeError: Falhas na API do Groq.
         SQLAlchemyError: Falhas de persistência.
     """
+    if external_id:
+        external_id = str(external_id).strip()
+        if external_id:
+            existente = Atendimento.query.filter_by(external_id=external_id).first()
+            if existente:
+                score_final = float(existente.qualidade.score_final) if existente.qualidade and existente.qualidade.score_final is not None else 0.0
+                logger.info(
+                    "Conversa externa %s já processada como atendimento #%d.",
+                    external_id,
+                    existente.idatendimento,
+                )
+                return {
+                    "atendimento_id": existente.idatendimento,
+                    "score_final": score_final,
+                    "created": False,
+                }
+
     # ── 1. Analisar com o LLM ─────────────────────────────────
     analise = analisar_atendimento(texto_conversa)
 
@@ -103,6 +122,8 @@ def processar_atendimento(texto_conversa: str) -> dict:
 
         # 3c. Atendimento principal
         atendimento = Atendimento(
+            protocolo=str(uuid.uuid4()),
+            external_id=external_id,
             texto=texto_conversa,
             resumo=resumo,
         )
@@ -148,6 +169,7 @@ def processar_atendimento(texto_conversa: str) -> dict:
         return {
             "atendimento_id": atendimento.idatendimento,
             "score_final": float(score_final),
+            "created": True,
         }
 
     except Exception as exc:

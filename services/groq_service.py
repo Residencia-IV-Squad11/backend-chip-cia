@@ -11,7 +11,7 @@ import logging
 from groq import Groq
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,10 @@ def _get_client() -> Groq:
         api_key = os.getenv("GROQ_API_KEY")
         if not api_key:
             raise EnvironmentError("GROQ_API_KEY não está definida nas variáveis de ambiente.")
+        if api_key.strip().lower().startswith("sua_chave") or api_key.strip().lower().startswith("gsk_xxxxxxxxx"):
+            raise EnvironmentError(
+                "GROQ_API_KEY está usando o placeholder do .env. Atualize .env com sua chave real do Groq."
+            )
         _client = Groq(api_key=api_key)
     return _client
 

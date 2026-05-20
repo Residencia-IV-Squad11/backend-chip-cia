@@ -111,6 +111,8 @@ class Atendimento(db.Model):
     __tablename__ = "atendimento"
 
     idatendimento = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    protocolo     = db.Column(db.String(100), unique=True, nullable=False)
+    external_id   = db.Column(db.String(128), unique=True, nullable=True)
     texto         = db.Column(db.Text)
     resumo        = db.Column(db.Text)
     data_criacao  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
@@ -129,6 +131,8 @@ class Atendimento(db.Model):
     def to_dict(self):
         return {
             "id":           self.idatendimento,
+            "protocolo":    self.protocolo,
+            "external_id":  self.external_id,
             "resumo":       self.resumo,
             "data_criacao": self.data_criacao.isoformat(),
             "classificacao": self.classificacao.to_dict() if self.classificacao else None,
