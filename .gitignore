@@ -4,3 +4,7 @@
 *.pyc
 *.pyo
 *.pyd
+
+# Frontend build and dependencies
+/frontend/node_modules
+/frontend/dist

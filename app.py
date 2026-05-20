@@ -10,6 +10,7 @@ Uso:
 import logging
 import os
 from flask import send_from_directory
+from sqlalchemy import inspect, text
 from config import create_app, db
 
 # ── Configuração de logging ────────────────────────────────────
@@ -27,6 +28,20 @@ app = create_app()
 with app.app_context():
     import models  # garante que todos os modelos são registrados
     db.create_all()
+
+    inspector = inspect(db.engine)
+    if "atendimento" in inspector.get_table_names():
+        columns = [column_info["name"] for column_info in inspector.get_columns("atendimento")]
+        if "external_id" not in columns:
+            try:
+                db.session.execute(text("ALTER TABLE atendimento ADD COLUMN external_id VARCHAR(128)"))
+                db.session.commit()
+                logging.getLogger(__name__).info("Coluna external_id adicionada à tabela atendimento.")
+            except Exception as exc:
+                logging.getLogger(__name__).warning(
+                    "Não foi possível criar a coluna external_id automaticamente: %s", exc
+                )
+
     logging.getLogger(__name__).info("Tabelas verificadas/criadas com sucesso.")
 
 

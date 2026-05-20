@@ -70,9 +70,15 @@ DB_USER=root
 DB_PASSWORD=sua_senha
 DB_NAME=chip_e_cia
 GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxxxxxx
+EXTERNAL_API_URL=https://api-externa.com/api/conversas/pendentes
+EXTERNAL_API_TOKEN=
+LOCAL_API_URL=http://localhost:5000/api/atendimento/avaliar
+LOCAL_API_TIMEOUT=60
+LOCAL_API_RETRY=3
 ```
 
 > Atenção: não deixe `GROQ_API_KEY` com o valor de placeholder. Substitua por sua chave real do Groq, caso contrário a análise retornará erro de configuração.
+> Também configure `EXTERNAL_API_URL` para apontar para o endpoint externo de conversas pendentes que o cron deve consumir.
 
 ### 5. Crie o banco de dados MySQL
 ```sql

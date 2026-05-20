@@ -52,18 +52,27 @@ def avaliar_atendimento():
             400,
         )
 
+    external_id = body.get("external_id")
+
     try:
-        resultado = processar_atendimento(texto)
+        resultado = processar_atendimento(texto, external_id=external_id)
+        status_code = 201 if resultado.get("created", True) else 200
+        mensagem = (
+            "Atendimento analisado e salvo com sucesso."
+            if resultado.get("created", True)
+            else "Atendimento externo já processado anteriormente."
+        )
+
         return (
             jsonify(
                 {
                     "sucesso": True,
                     "atendimento_id": resultado["atendimento_id"],
                     "score_final": resultado["score_final"],
-                    "mensagem": "Atendimento analisado e salvo com sucesso.",
+                    "mensagem": mensagem,
                 }
             ),
-            201,
+            status_code,
         )
 
     except ValueError as exc:
