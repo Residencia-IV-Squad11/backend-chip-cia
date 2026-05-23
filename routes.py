@@ -10,7 +10,7 @@ from flask import Blueprint, jsonify, request
 from sqlalchemy import func
 
 from config import db
-from models import Atendimento, Categoria, Classificacao, Qualidade, Sentimento
+from models import Atendimento, AvaliacaoFila, Categoria, Classificacao, Qualidade, Sentimento
 from services.atendimento_service import processar_atendimento
 
 logger = logging.getLogger(__name__)
@@ -20,6 +20,114 @@ logger = logging.getLogger(__name__)
 # ──────────────────────────────────────────────────────────────
 atendimento_bp = Blueprint("atendimento", __name__)
 dashboard_bp   = Blueprint("dashboard",   __name__)
+
+
+# ──────────────────────────────────────────────────────────────
+# POST /api/atendimento/receber-conversa
+# ──────────────────────────────────────────────────────────────
+@atendimento_bp.route("/receber-conversa", methods=["POST"])
+def receber_conversa():
+    """
+    Recebe uma conversa do sistema externo (Chip e Cia) e salva
+    na fila para ser processada pelo cron com o Groq.
+
+    Body JSON esperado:
+    {
+        "protocol_id": 10,
+        "numero_protocolo": "2026-0001",
+        "cliente_nome": "João",
+        "atendente_nome": "Maria",
+        "nota": 8,
+        "comentario": "Ótimo atendimento",
+        "mensagens": [
+            {"remetente": "João", "conteudo": "Olá", "enviadaEm": "2026-01-01T10:00:00"},
+            {"remetente": "Maria", "conteudo": "Olá, como posso ajudar?", "enviadaEm": "2026-01-01T10:01:00"}
+        ]
+    }
+    """
+    body = request.get_json(silent=True)
+
+    if not body:
+        return jsonify({"sucesso": False, "erro": "Body JSON inválido ou vazio."}), 400
+
+    # Campos obrigatórios
+    protocol_id      = body.get("protocol_id")
+    numero_protocolo = body.get("numero_protocolo")
+    mensagens        = body.get("mensagens", [])
+
+    if not protocol_id or not numero_protocolo:
+        return jsonify({"sucesso": False, "erro": "Os campos 'protocol_id' e 'numero_protocolo' são obrigatórios."}), 400
+
+    if not mensagens:
+        return jsonify({"sucesso": False, "erro": "O campo 'mensagens' não pode estar vazio."}), 400
+
+    # Verifica se esse protocolo já está na fila
+    ja_existe = AvaliacaoFila.query.filter_by(protocol_id=protocol_id).first()
+    if ja_existe:
+        return jsonify({"sucesso": False, "erro": f"Protocolo {numero_protocolo} já está na fila."}), 409
+
+    try:
+        nova = AvaliacaoFila(
+            protocol_id      = protocol_id,
+            numero_protocolo = numero_protocolo,
+            cliente_nome     = body.get("cliente_nome"),
+            atendente_nome   = body.get("atendente_nome"),
+            nota             = body.get("nota"),
+            comentario       = body.get("comentario"),
+            mensagens        = mensagens,
+            status           = "pendente",
+        )
+        db.session.add(nova)
+        db.session.commit()
+
+        logger.info("Conversa do protocolo %s recebida e adicionada à fila.", numero_protocolo)
+
+        return jsonify({
+            "sucesso": True,
+            "mensagem": f"Protocolo {numero_protocolo} adicionado à fila com sucesso.",
+            "id": nova.id,
+        }), 201
+
+    except Exception as exc:
+        db.session.rollback()
+        logger.error("Erro ao salvar conversa na fila: %s", exc)
+        return jsonify({"sucesso": False, "erro": "Erro interno ao salvar na fila."}), 500
+
+
+# ──────────────────────────────────────────────────────────────
+# GET /api/atendimento/fila
+# ──────────────────────────────────────────────────────────────
+@atendimento_bp.route("/fila", methods=["GET"])
+def listar_fila():
+    """Lista os itens da fila com seus status."""
+    status = request.args.get("status")
+
+    query = AvaliacaoFila.query
+
+    if status:
+        query = query.filter_by(status=status)
+
+    itens = query.order_by(AvaliacaoFila.criado_em.desc()).limit(50).all()
+
+    return jsonify({
+        "sucesso": True,
+        "total": len(itens),
+        "itens": [
+            {
+                "id":               item.id,
+                "protocol_id":      item.protocol_id,
+                "numero_protocolo": item.numero_protocolo,
+                "cliente_nome":     item.cliente_nome,
+                "atendente_nome":   item.atendente_nome,
+                "nota":             item.nota,
+                "status":           item.status,
+                "tentativas":       item.tentativas,
+                "criado_em":        item.criado_em.isoformat() if item.criado_em else None,
+                "processado_em":    item.processado_em.isoformat() if item.processado_em else None,
+            }
+            for item in itens
+        ],
+    }), 200
 
 
 # ──────────────────────────────────────────────────────────────
@@ -91,20 +199,18 @@ def detalhe_atendimento(atendimento_id: int):
     return jsonify({"sucesso": True, "dados": atendimento.to_dict()}), 200
 
 
-
 # ──────────────────────────────────────────────────────────────
 # GET /api/atendimento/listar
 # ──────────────────────────────────────────────────────────────
 @atendimento_bp.route("/listar", methods=["GET"])
 def listar_atendimentos():
     """
-    Lista atendimentos com paginação, trazendo os dados de 
+    Lista atendimentos com paginação, trazendo os dados de
     classificação e qualidade através de JOINs.
     """
     page     = request.args.get("page",     1,  type=int)
     per_page = min(request.args.get("per_page", 20, type=int), 100)
 
-    # Fazemos um JOIN explícito para garantir que todas as métricas vão para o frontend
     paginado = (
         db.session.query(Atendimento, Qualidade, Classificacao, Categoria, Sentimento)
         .outerjoin(Qualidade, Qualidade.atendimento_id == Atendimento.idatendimento)
@@ -116,20 +222,17 @@ def listar_atendimentos():
     )
 
     atendimentos_completos = []
-    
-    # Extraímos os dados das múltiplas tabelas para um único dicionário plano
+
     for atd, qual, clas, cat, sent in paginado.items:
         atendimentos_completos.append({
             "idatendimento": atd.idatendimento,
             "resumo": atd.resumo,
             "data_criacao": atd.data_criacao.isoformat() if atd.data_criacao else None,
-            # Se houver qualidade, enviamos os scores, senão enviamos 0
             "score_final": float(qual.score_final) if qual and qual.score_final else 0,
             "empatia": int(qual.empatia) if qual and qual.empatia else 0,
             "clareza": int(qual.clareza) if qual and qual.clareza else 0,
             "objetividade": int(qual.objetividade) if qual and qual.objetividade else 0,
             "resolutividade": int(qual.resolutividade) if qual and qual.resolutividade else 0,
-            # Se houver classificação, enviamos os nomes, senão enviamos um valor padrão
             "categoria": cat.nome if cat else "Sem Categoria",
             "sentimento": sent.nome if sent else "Neutro"
         })
@@ -148,24 +251,12 @@ def listar_atendimentos():
 # ──────────────────────────────────────────────────────────────
 @dashboard_bp.route("/resumo", methods=["GET"])
 def resumo_dashboard():
-    """
-    Agrega informações para alimentar o dashboard:
-      - total de atendimentos
-      - média do score_final
-      - distribuição de sentimento
-      - top 5 categorias mais frequentes
-    """
     try:
-        # Total de atendimentos
         total = db.session.query(func.count(Atendimento.idatendimento)).scalar() or 0
 
-        # Média geral do score_final
-        media_score = (
-            db.session.query(func.avg(Qualidade.score_final)).scalar()
-        )
+        media_score = db.session.query(func.avg(Qualidade.score_final)).scalar()
         media_score = round(float(media_score), 2) if media_score else 0.0
 
-        # Distribuição de sentimento
         sentimento_rows = (
             db.session.query(
                 Sentimento.nome,
@@ -179,7 +270,6 @@ def resumo_dashboard():
             {"sentimento": row.nome, "total": row.total} for row in sentimento_rows
         ]
 
-        # Top 5 categorias
         categoria_rows = (
             db.session.query(
                 Categoria.nome,
@@ -195,7 +285,6 @@ def resumo_dashboard():
             {"categoria": row.nome, "total": row.total} for row in categoria_rows
         ]
 
-        # Evolução de score por dia (últimos 30 registros)
         evolucao_rows = (
             db.session.query(
                 func.date(Atendimento.data_criacao).label("data"),
@@ -238,7 +327,7 @@ def resumo_dashboard():
 # ──────────────────────────────────────────────────────────────
 @dashboard_bp.route("/qualidade", methods=["GET"])
 def media_qualidade():
-    """Retorna a média de cada dimensão de qualidade (empatia, clareza, etc.)."""
+    """Retorna a média de cada dimensão de qualidade."""
     try:
         row = db.session.query(
             func.round(func.avg(Qualidade.empatia),        2).label("empatia"),

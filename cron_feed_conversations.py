@@ -1,6 +1,9 @@
 """
-Cron Job — busca protocolos fechados, monta a fila de avaliação
-e processa com o Groq os itens pendentes.
+Cron Job — processa os itens pendentes na fila avaliacao_fila
+enviando as conversas ao Groq para análise.
+
+As conversas chegam nessa fila via POST /api/atendimento/receber-conversa
+feito pelo sistema externo (Chip e Cia).
 """
 
 import logging
@@ -13,63 +16,28 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
-def buscar_protocolos_para_avaliar(conn):
-    """
-    Consulta o banco buscando protocolos fechados
-    que ainda não estão na fila de avaliação.
-    """
-    sql = """
-        SELECT
-            p."Id"            AS protocol_id,
-            p."Numero"        AS numero_protocolo,
-            c."ClienteNome"   AS cliente_nome,
-            c."AtendenteNome" AS atendente_nome,
-            av."Nota"         AS nota,
-            av."Comentario"   AS comentario,
-            (
-                SELECT json_agg(
-                    json_build_object(
-                        'remetente', m."Remetente",
-                        'conteudo',  m."Conteudo",
-                        'enviadaEm', m."EnviadaEm"
-                    ) ORDER BY m."EnviadaEm"
-                )
-                FROM "ChannelChatMessage" m
-                WHERE m."ProtocolId" = p."Id"
-            ) AS mensagens
-        FROM "ChannelChatProtocol" p
-        JOIN "ChannelChat" c ON c."Id" = p."ChannelChatId"
-        LEFT JOIN "Avaliacao" av ON av."ProtocolId" = p."Id"
-        WHERE p."FechadoEm" IS NOT NULL
-          AND p."Id" NOT IN (
-              SELECT protocol_id FROM avaliacao_fila
-          )
-        ORDER BY p."FechadoEm" DESC
-        LIMIT 50
-    """
-    result = conn.execute(db.text(sql))
-    return result.fetchall()
-
-
 def processar_pendentes():
     """Pega itens com status 'pendente' e chama o Groq para analisar."""
     pendentes = AvaliacaoFila.query.filter_by(status="pendente").limit(10).all()
 
+    if not pendentes:
+        logger.info("Nenhum item pendente na fila.")
+        return
+
+    logger.info("%d item(s) pendente(s) encontrado(s).", len(pendentes))
+
     for item in pendentes:
-        # Se já tentou 3 vezes e falhou, marca como erro e pula
         if item.tentativas >= 3:
             item.status = "erro"
             db.session.commit()
             logger.warning("Protocolo %s marcado como erro após 3 tentativas.", item.numero_protocolo)
             continue
 
-        # Marca como processando e incrementa tentativas
         item.status = "processando"
         item.tentativas += 1
         db.session.commit()
 
         try:
-            # Monta o texto da conversa para enviar ao Groq
             linhas = []
             for msg in (item.mensagens or []):
                 remetente = msg.get("remetente", "Desconhecido")
@@ -78,14 +46,11 @@ def processar_pendentes():
 
             texto = "\n".join(linhas)
 
-            # Adiciona a avaliação do cliente se existir
             if item.comentario:
                 texto += f"\n\nAvaliação do cliente: nota {item.nota}/10 — {item.comentario}"
 
-            # Chama o Groq
             resultado = analisar_atendimento(texto)
 
-            # Salva o resultado e marca como concluído
             item.resultado_groq = str(resultado)
             item.status         = "concluido"
             item.processado_em  = datetime.utcnow()
@@ -94,7 +59,6 @@ def processar_pendentes():
             logger.info("Protocolo %s processado com sucesso.", item.numero_protocolo)
 
         except Exception as exc:
-            # Em caso de erro, volta para pendente para tentar de novo
             item.status = "pendente"
             db.session.commit()
             logger.error("Erro ao processar protocolo %s: %s", item.numero_protocolo, exc)
@@ -105,29 +69,6 @@ def feed_conversations():
     app = create_app()
 
     with app.app_context():
-        conn = db.engine.connect()
-
-        # Passo 1 — busca protocolos novos e insere na fila
-        protocolos = buscar_protocolos_para_avaliar(conn)
-        logger.info("%d protocolo(s) novo(s) encontrado(s).", len(protocolos))
-
-        for row in protocolos:
-            novo = AvaliacaoFila(
-                protocol_id      = row.protocol_id,
-                numero_protocolo = row.numero_protocolo,
-                cliente_nome     = row.cliente_nome,
-                atendente_nome   = row.atendente_nome,
-                nota             = row.nota,
-                comentario       = row.comentario,
-                mensagens        = row.mensagens or [],
-                status           = "pendente",
-            )
-            db.session.add(novo)
-
-        db.session.commit()
-        logger.info("Protocolos inseridos na fila.")
-
-        # Passo 2 — processa os pendentes com o Groq
         processar_pendentes()
 
     logger.info("Cron finalizado.")
