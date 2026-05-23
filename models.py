@@ -191,3 +191,21 @@ class Qualidade(db.Model):
             "resolutividade": self.resolutividade,
             "score_final":    float(self.score_final) if self.score_final is not None else None,
         }
+
+
+class AvaliacaoFila(db.Model):
+    __tablename__ = "avaliacao_fila"
+
+    id               = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    protocol_id      = db.Column(db.Integer, nullable=False)
+    numero_protocolo = db.Column(db.String(100), nullable=False)
+    cliente_nome     = db.Column(db.String(255))
+    atendente_nome   = db.Column(db.String(255))
+    nota             = db.Column(db.Integer)
+    comentario       = db.Column(db.Text)
+    mensagens        = db.Column(db.JSON, nullable=False, default=list)
+    status           = db.Column(db.String(20), nullable=False, default="pendente")
+    resultado_groq   = db.Column(db.Text)
+    criado_em        = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    processado_em    = db.Column(db.DateTime)
+    tentativas       = db.Column(db.Integer, nullable=False, default=0)
