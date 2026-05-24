@@ -8,16 +8,34 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.10.0
-      # Você pode definir as outras variáveis de ambiente no painel do Render
-      # ou usar um grupo de variáveis compartilhadas.
+      - key: DATABASE_URL
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: FLASK_ENV
+        value: production
+      - key: FLASK_DEBUG
+        value: "False"
+      - key: SECRET_KEY
+        sync: false
 
-  # O Cron Job que vai rodar periodicamente
+  # O Cron Job que roda todo dia às 18h
   - type: cron
     name: cron-alimenta-conversas
     env: python
     buildCommand: pip install -r requirements.txt
     startCommand: python cron_feed_conversations.py
-    schedule: "0 0 * * *" # Roda todo dia à meia noite. Ajuste se necessário.
+    schedule: "0 18 * * *"
     envVars:
       - key: PYTHON_VERSION
         value: 3.10.0
+      - key: DATABASE_URL
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: FLASK_ENV
+        value: production
+      - key: FLASK_DEBUG
+        value: "False"
+      - key: SECRET_KEY
+        sync: false
