@@ -1,10 +1,8 @@
 """
 routes.py — Blueprints e endpoints da API REST.
-
-  Blueprint: atendimento_bp  →  /api/atendimento
-  Blueprint: dashboard_bp    →  /api/dashboard
 """
 
+import json
 import logging
 from flask import Blueprint, jsonify, request
 from sqlalchemy import func
@@ -15,9 +13,6 @@ from services.atendimento_service import processar_atendimento
 
 logger = logging.getLogger(__name__)
 
-# ──────────────────────────────────────────────────────────────
-# Blueprints
-# ──────────────────────────────────────────────────────────────
 atendimento_bp = Blueprint("atendimento", __name__)
 dashboard_bp   = Blueprint("dashboard",   __name__)
 
@@ -27,41 +22,20 @@ dashboard_bp   = Blueprint("dashboard",   __name__)
 # ──────────────────────────────────────────────────────────────
 @atendimento_bp.route("/receber-conversa", methods=["POST"])
 def receber_conversa():
-    """
-    Recebe uma conversa do sistema externo (Chip e Cia) e salva
-    na fila para ser processada pelo cron com o Groq.
-
-    Body JSON esperado:
-    {
-        "protocol_id": 10,
-        "numero_protocolo": "2026-0001",
-        "cliente_nome": "João",
-        "atendente_nome": "Maria",
-        "nota": 8,
-        "comentario": "Ótimo atendimento",
-        "mensagens": [
-            {"remetente": "João", "conteudo": "Olá", "enviadaEm": "2026-01-01T10:00:00"},
-            {"remetente": "Maria", "conteudo": "Olá, como posso ajudar?", "enviadaEm": "2026-01-01T10:01:00"}
-        ]
-    }
-    """
     body = request.get_json(silent=True)
-
     if not body:
-        return jsonify({"sucesso": False, "erro": "Body JSON inválido ou vazio."}), 400
+        return jsonify({"sucesso": False, "erro": "Body JSON inválido."}), 400
 
-    # Campos obrigatórios
     protocol_id      = body.get("protocol_id")
     numero_protocolo = body.get("numero_protocolo")
     mensagens        = body.get("mensagens", [])
 
     if not protocol_id or not numero_protocolo:
-        return jsonify({"sucesso": False, "erro": "Os campos 'protocol_id' e 'numero_protocolo' são obrigatórios."}), 400
+        return jsonify({"sucesso": False, "erro": "protocol_id e numero_protocolo são obrigatórios."}), 400
 
     if not mensagens:
-        return jsonify({"sucesso": False, "erro": "O campo 'mensagens' não pode estar vazio."}), 400
+        return jsonify({"sucesso": False, "erro": "mensagens não pode estar vazio."}), 400
 
-    # Verifica se esse protocolo já está na fila
     ja_existe = AvaliacaoFila.query.filter_by(protocol_id=protocol_id).first()
     if ja_existe:
         return jsonify({"sucesso": False, "erro": f"Protocolo {numero_protocolo} já está na fila."}), 409
@@ -79,19 +53,10 @@ def receber_conversa():
         )
         db.session.add(nova)
         db.session.commit()
-
-        logger.info("Conversa do protocolo %s recebida e adicionada à fila.", numero_protocolo)
-
-        return jsonify({
-            "sucesso": True,
-            "mensagem": f"Protocolo {numero_protocolo} adicionado à fila com sucesso.",
-            "id": nova.id,
-        }), 201
-
+        return jsonify({"sucesso": True, "mensagem": f"Protocolo {numero_protocolo} adicionado.", "id": nova.id}), 201
     except Exception as exc:
         db.session.rollback()
-        logger.error("Erro ao salvar conversa na fila: %s", exc)
-        return jsonify({"sucesso": False, "erro": "Erro interno ao salvar na fila."}), 500
+        return jsonify({"sucesso": False, "erro": "Erro interno."}), 500
 
 
 # ──────────────────────────────────────────────────────────────
@@ -99,16 +64,11 @@ def receber_conversa():
 # ──────────────────────────────────────────────────────────────
 @atendimento_bp.route("/fila", methods=["GET"])
 def listar_fila():
-    """Lista os itens da fila com seus status."""
     status = request.args.get("status")
-
-    query = AvaliacaoFila.query
-
+    query  = AvaliacaoFila.query
     if status:
         query = query.filter_by(status=status)
-
     itens = query.order_by(AvaliacaoFila.criado_em.desc()).limit(50).all()
-
     return jsonify({
         "sucesso": True,
         "total": len(itens),
@@ -121,6 +81,7 @@ def listar_fila():
                 "atendente_nome":   item.atendente_nome,
                 "nota":             item.nota,
                 "status":           item.status,
+                "resultado_groq":   item.resultado_groq,
                 "tentativas":       item.tentativas,
                 "criado_em":        item.criado_em.isoformat() if item.criado_em else None,
                 "processado_em":    item.processado_em.isoformat() if item.processado_em else None,
@@ -135,55 +96,23 @@ def listar_fila():
 # ──────────────────────────────────────────────────────────────
 @atendimento_bp.route("/avaliar", methods=["POST"])
 def avaliar_atendimento():
-    """
-    Recebe o texto de uma conversa, envia ao Groq para análise
-    e persiste os resultados no banco de dados.
-
-    Body JSON esperado:
-        { "texto_conversa": "..." }
-
-    Returns 201 com { "sucesso": true, "atendimento_id": int, "score_final": float }
-    """
     body = request.get_json(silent=True)
-
     if not body or not body.get("texto_conversa"):
-        return (
-            jsonify({"sucesso": False, "erro": "O campo 'texto_conversa' é obrigatório."}),
-            400,
-        )
+        return jsonify({"sucesso": False, "erro": "O campo 'texto_conversa' é obrigatório."}), 400
 
     texto = body["texto_conversa"].strip()
     if len(texto) < 20:
-        return (
-            jsonify({"sucesso": False, "erro": "O texto da conversa é muito curto para análise."}),
-            400,
-        )
+        return jsonify({"sucesso": False, "erro": "Texto muito curto."}), 400
 
     try:
         resultado = processar_atendimento(texto)
-        return (
-            jsonify(
-                {
-                    "sucesso": True,
-                    "atendimento_id": resultado["atendimento_id"],
-                    "score_final": resultado["score_final"],
-                    "mensagem": "Atendimento analisado e salvo com sucesso.",
-                }
-            ),
-            201,
-        )
-
+        return jsonify({"sucesso": True, "atendimento_id": resultado["atendimento_id"], "score_final": resultado["score_final"]}), 201
     except ValueError as exc:
-        logger.warning("Dados inválidos do LLM: %s", exc)
         return jsonify({"sucesso": False, "erro": str(exc)}), 422
-
     except RuntimeError as exc:
-        logger.error("Erro na API do Groq: %s", exc)
         return jsonify({"sucesso": False, "erro": str(exc)}), 502
-
-    except Exception as exc:
-        logger.exception("Erro inesperado ao processar atendimento.")
-        return jsonify({"sucesso": False, "erro": "Erro interno no servidor."}), 500
+    except Exception:
+        return jsonify({"sucesso": False, "erro": "Erro interno."}), 500
 
 
 # ──────────────────────────────────────────────────────────────
@@ -191,11 +120,9 @@ def avaliar_atendimento():
 # ──────────────────────────────────────────────────────────────
 @atendimento_bp.route("/<int:atendimento_id>", methods=["GET"])
 def detalhe_atendimento(atendimento_id: int):
-    """Retorna os detalhes completos de um atendimento pelo ID."""
     atendimento = db.session.get(Atendimento, atendimento_id)
     if not atendimento:
-        return jsonify({"sucesso": False, "erro": "Atendimento não encontrado."}), 404
-
+        return jsonify({"sucesso": False, "erro": "Não encontrado."}), 404
     return jsonify({"sucesso": True, "dados": atendimento.to_dict()}), 200
 
 
@@ -204,10 +131,6 @@ def detalhe_atendimento(atendimento_id: int):
 # ──────────────────────────────────────────────────────────────
 @atendimento_bp.route("/listar", methods=["GET"])
 def listar_atendimentos():
-    """
-    Lista atendimentos com paginação, trazendo os dados de
-    classificação e qualidade através de JOINs.
-    """
     page     = request.args.get("page",     1,  type=int)
     per_page = min(request.args.get("per_page", 20, type=int), 100)
 
@@ -222,88 +145,123 @@ def listar_atendimentos():
     )
 
     atendimentos_completos = []
-
     for atd, qual, clas, cat, sent in paginado.items:
         atendimentos_completos.append({
             "idatendimento": atd.idatendimento,
-            "resumo": atd.resumo,
-            "data_criacao": atd.data_criacao.isoformat() if atd.data_criacao else None,
-            "score_final": float(qual.score_final) if qual and qual.score_final else 0,
-            "empatia": int(qual.empatia) if qual and qual.empatia else 0,
-            "clareza": int(qual.clareza) if qual and qual.clareza else 0,
-            "objetividade": int(qual.objetividade) if qual and qual.objetividade else 0,
-            "resolutividade": int(qual.resolutividade) if qual and qual.resolutividade else 0,
-            "categoria": cat.nome if cat else "Sem Categoria",
-            "sentimento": sent.nome if sent else "Neutro"
+            "resumo":        atd.resumo,
+            "data_criacao":  atd.data_criacao.isoformat() if atd.data_criacao else None,
+            "score_final":   float(qual.score_final) if qual and qual.score_final else 0,
+            "empatia":       int(qual.empatia)        if qual and qual.empatia    else 0,
+            "clareza":       int(qual.clareza)        if qual and qual.clareza    else 0,
+            "objetividade":  int(qual.objetividade)   if qual and qual.objetividade else 0,
+            "resolutividade":int(qual.resolutividade) if qual and qual.resolutividade else 0,
+            "categoria":     cat.nome  if cat  else "Sem Categoria",
+            "sentimento":    sent.nome if sent else "Neutro"
         })
 
     return jsonify({
-        "sucesso":    True,
-        "total":      paginado.total,
-        "pagina":     paginado.page,
-        "paginas":    paginado.pages,
+        "sucesso": True, "total": paginado.total,
+        "pagina": paginado.page, "paginas": paginado.pages,
         "atendimentos": atendimentos_completos,
     }), 200
 
 
 # ──────────────────────────────────────────────────────────────
-# GET /api/dashboard/resumo
+# GET /api/dashboard/resumo  ← lê da avaliacao_fila
 # ──────────────────────────────────────────────────────────────
 @dashboard_bp.route("/resumo", methods=["GET"])
 def resumo_dashboard():
     try:
-        total = db.session.query(func.count(Atendimento.idatendimento)).scalar() or 0
+        # Busca todos os itens concluídos
+        concluidos = AvaliacaoFila.query.filter_by(status="concluido").all()
 
-        media_score = db.session.query(func.avg(Qualidade.score_final)).scalar()
-        media_score = round(float(media_score), 2) if media_score else 0.0
+        total = len(concluidos)
+        scores = []
+        sentimentos = {"Positivo": 0, "Neutro": 0, "Negativo": 0}
+        evolucao = {}
+        recentes = []
 
-        sentimento_rows = (
-            db.session.query(
-                Sentimento.nome,
-                func.count(Classificacao.idclassificacao).label("total"),
-            )
-            .join(Classificacao, Classificacao.sentimento_id == Sentimento.idsentimento)
-            .group_by(Sentimento.nome)
-            .all()
-        )
-        distribuicao_sentimento = [
-            {"sentimento": row.nome, "total": row.total} for row in sentimento_rows
-        ]
+        for item in concluidos:
+            resultado = {}
+            if item.resultado_groq:
+                try:
+                    resultado = json.loads(item.resultado_groq.replace("'", '"'))
+                except Exception:
+                    try:
+                        import ast
+                        resultado = ast.literal_eval(item.resultado_groq)
+                    except Exception:
+                        resultado = {}
 
-        categoria_rows = (
-            db.session.query(
-                Categoria.nome,
-                func.count(Classificacao.idclassificacao).label("total"),
-            )
-            .join(Classificacao, Classificacao.categoria_id == Categoria.idcategoria)
-            .group_by(Categoria.nome)
-            .order_by(func.count(Classificacao.idclassificacao).desc())
-            .limit(5)
-            .all()
-        )
-        top_categorias = [
-            {"categoria": row.nome, "total": row.total} for row in categoria_rows
-        ]
+            qualidade   = resultado.get("qualidade", {})
+            classif     = resultado.get("classificacao", {})
+            score       = qualidade.get("score_final", 0) or 0
+            sentimento  = classif.get("sentimento", "Neutro")
+            resumo      = resultado.get("resumo", "")
+            categoria   = classif.get("categoria", "Geral")
+            empatia     = qualidade.get("empatia", 0) or 0
+            clareza     = qualidade.get("clareza", 0) or 0
+            resolutiv   = qualidade.get("resolutividade", 0) or 0
 
-        evolucao_rows = (
-            db.session.query(
-                func.date(Atendimento.data_criacao).label("data"),
-                func.round(func.avg(Qualidade.score_final), 2).label("media_score"),
-                func.count(Atendimento.idatendimento).label("total"),
-            )
-            .join(Qualidade, Qualidade.atendimento_id == Atendimento.idatendimento)
-            .group_by(func.date(Atendimento.data_criacao))
-            .order_by(func.date(Atendimento.data_criacao).desc())
-            .limit(30)
-            .all()
-        )
-        evolucao_score = [
+            scores.append(float(score))
+
+            # Sentimento
+            s = sentimento.lower()
+            if "positiv" in s:
+                sentimentos["Positivo"] += 1
+            elif "negativ" in s:
+                sentimentos["Negativo"] += 1
+            else:
+                sentimentos["Neutro"] += 1
+
+            # Evolução por dia
+            if item.processado_em:
+                dia = item.processado_em.strftime("%Y-%m-%d")
+                if dia not in evolucao:
+                    evolucao[dia] = {"scores": [], "empatia": [], "clareza": [], "resolutividade": []}
+                evolucao[dia]["scores"].append(float(score))
+                evolucao[dia]["empatia"].append(float(empatia))
+                evolucao[dia]["clareza"].append(float(clareza))
+                evolucao[dia]["resolutividade"].append(float(resolutiv))
+
+            # Recentes
+            recentes.append({
+                "id":         item.id,
+                "category":   categoria,
+                "sentiment":  "positive" if "positiv" in sentimento.lower() else ("negative" if "negativ" in sentimento.lower() else "neutral"),
+                "score":      float(score),
+                "summary":    resumo,
+                "created_at": item.criado_em.isoformat() if item.criado_em else "",
+                "empathy":    float(empatia),
+                "clarity":    float(clareza),
+                "objectivity":  float(qualidade.get("objetividade", 0) or 0),
+                "resolutiveness": float(resolutiv),
+                "sla_time_minutes": 0,
+                "numero_protocolo": item.numero_protocolo,
+                "cliente_nome":     item.cliente_nome,
+                "atendente_nome":   item.atendente_nome,
+            })
+
+        media_score = round(sum(scores) / len(scores), 2) if scores else 0.0
+
+        # Evolução formatada
+        evolucao_lista = sorted([
             {
-                "data":        str(row.data),
-                "media_score": float(row.media_score) if row.media_score else 0.0,
-                "total":       row.total,
+                "date":           dia,
+                "media_score":    round(sum(v["scores"]) / len(v["scores"]), 2),
+                "empathy":        round(sum(v["empatia"]) / len(v["empatia"]), 2),
+                "clarity":        round(sum(v["clareza"]) / len(v["clareza"]), 2),
+                "resolutiveness": round(sum(v["resolutividade"]) / len(v["resolutividade"]), 2),
+                "objectivity":    0,
             }
-            for row in reversed(evolucao_rows)
+            for dia, v in evolucao.items()
+        ], key=lambda x: x["date"])
+
+        # Distribução de sentimento
+        dist_sentimento = [
+            {"sentimento": "Positivo", "total": sentimentos["Positivo"]},
+            {"sentimento": "Neutro",   "total": sentimentos["Neutro"]},
+            {"sentimento": "Negativo", "total": sentimentos["Negativo"]},
         ]
 
         return jsonify({
@@ -311,15 +269,15 @@ def resumo_dashboard():
             "dados": {
                 "total_atendimentos":      total,
                 "media_score_final":       media_score,
-                "distribuicao_sentimento": distribuicao_sentimento,
-                "top_categorias":          top_categorias,
-                "evolucao_score_diaria":   evolucao_score,
+                "distribuicao_sentimento": dist_sentimento,
+                "evolucao_score_diaria":   evolucao_lista,
+                "recentes":                list(reversed(recentes))[:10],
             },
         }), 200
 
     except Exception as exc:
-        logger.exception("Erro ao gerar resumo do dashboard.")
-        return jsonify({"sucesso": False, "erro": "Erro ao consultar o banco de dados."}), 500
+        logger.exception("Erro ao gerar resumo.")
+        return jsonify({"sucesso": False, "erro": str(exc)}), 500
 
 
 # ──────────────────────────────────────────────────────────────
@@ -327,7 +285,6 @@ def resumo_dashboard():
 # ──────────────────────────────────────────────────────────────
 @dashboard_bp.route("/qualidade", methods=["GET"])
 def media_qualidade():
-    """Retorna a média de cada dimensão de qualidade."""
     try:
         row = db.session.query(
             func.round(func.avg(Qualidade.empatia),        2).label("empatia"),
@@ -335,17 +292,11 @@ def media_qualidade():
             func.round(func.avg(Qualidade.objetividade),   2).label("objetividade"),
             func.round(func.avg(Qualidade.resolutividade), 2).label("resolutividade"),
         ).first()
-
-        return jsonify({
-            "sucesso": True,
-            "dados": {
-                "empatia":        float(row.empatia)        if row.empatia        else 0.0,
-                "clareza":        float(row.clareza)        if row.clareza        else 0.0,
-                "objetividade":   float(row.objetividade)   if row.objetividade   else 0.0,
-                "resolutividade": float(row.resolutividade) if row.resolutividade else 0.0,
-            },
-        }), 200
-
+        return jsonify({"sucesso": True, "dados": {
+            "empatia":        float(row.empatia)        if row.empatia        else 0.0,
+            "clareza":        float(row.clareza)        if row.clareza        else 0.0,
+            "objetividade":   float(row.objetividade)   if row.objetividade   else 0.0,
+            "resolutividade": float(row.resolutividade) if row.resolutividade else 0.0,
+        }}), 200
     except Exception as exc:
-        logger.exception("Erro ao calcular média de qualidade.")
-        return jsonify({"sucesso": False, "erro": "Erro ao consultar o banco de dados."}), 500
+        return jsonify({"sucesso": False, "erro": str(exc)}), 500
