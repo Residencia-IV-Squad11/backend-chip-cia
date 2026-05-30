@@ -69,7 +69,7 @@ def processar_pendentes():
     logger.info("%d item(s) pendente(s) encontrado(s).", len(pendentes))
 
     for item in pendentes:
-        # Se já tentou 3 vezes e falhou, marca como erro e para
+       
         if item.tentativas >= 3:
             item.status = "erro"
             db.session.commit()
