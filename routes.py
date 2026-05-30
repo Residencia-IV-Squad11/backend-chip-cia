@@ -105,7 +105,7 @@ def avaliar_atendimento():
         return jsonify({"sucesso": False, "erro": "Texto muito curto."}), 400
 
     try:
-        resultado = processar_atendimento(texto)
+        resultado = processar_atendimento(texto, body.get("protocolo"))
         return jsonify({"sucesso": True, "atendimento_id": resultado["atendimento_id"], "score_final": resultado["score_final"]}), 201
     except ValueError as exc:
         return jsonify({"sucesso": False, "erro": str(exc)}), 422

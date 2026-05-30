@@ -40,7 +40,7 @@ def _get_or_create(model, filter_kwargs: dict, extra_kwargs: dict | None = None)
     return instance
 
 
-def processar_atendimento(texto_conversa: str) -> dict:
+def processar_atendimento(texto_conversa: str, numero_protocolo: str | None = None) -> dict:
     # ── 1. Analisar com o LLM
     analise = analisar_atendimento(texto_conversa)
 
@@ -108,7 +108,8 @@ def processar_atendimento(texto_conversa: str) -> dict:
         db.session.add(qualidade)
 
         # ── 8. Salva na avaliacao_fila para aparecer no dashboard
-        numero_protocolo = f"MANUAL-{atendimento.idatendimento}"
+        if not numero_protocolo:
+            numero_protocolo = f"MANUAL-{atendimento.idatendimento}"
 
         # Converte o texto em lista de mensagens
         mensagens = []
